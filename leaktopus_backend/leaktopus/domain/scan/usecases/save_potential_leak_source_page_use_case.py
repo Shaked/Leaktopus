@@ -1,25 +1,25 @@
 import json
 from typing import List
 
+from leaktopus.domain.extractors.email_extractor import EmailExtractor
 from leaktopus.domain.leak.leak_operator import LeakOperator
+from leaktopus.domain.scan.contracts.potential_leak_source_filter_interface import (
+    PotentialLeakSourceFilterInterface,
+)
+from leaktopus.domain.scan.entities.potential_leak_source import PotentialLeakSource
 from leaktopus.services.leak.leak_service import LeakService
 from leaktopus.services.potential_leak_source_scan_status.service import (
     PotentialLeakSourceScanStatusService,
-)
-from leaktopus.domain.extractors.email_extractor import EmailExtractor
-from leaktopus.domain.scan.entities.potential_leak_source import PotentialLeakSource
-from leaktopus.domain.scan.contracts.potential_leak_source_filter_interface import (
-    PotentialLeakSourceFilterInterface,
 )
 
 
 class SavePotentialLeakSourcePageUseCase:
     def __init__(
-        self,
-        leak_service: LeakService,
-        potential_leak_source_filter: PotentialLeakSourceFilterInterface,
-        email_extractor: EmailExtractor,
-        potential_leak_source_scan_status_service: PotentialLeakSourceScanStatusService,
+            self,
+            leak_service: LeakService,
+            potential_leak_source_filter: PotentialLeakSourceFilterInterface,
+            email_extractor: EmailExtractor,
+            potential_leak_source_scan_status_service: PotentialLeakSourceScanStatusService,
     ):
         self.leak_service = leak_service
         self.potential_leak_source_filter = potential_leak_source_filter
@@ -29,16 +29,18 @@ class SavePotentialLeakSourcePageUseCase:
         )
 
     def execute(
-        self,
-        scan_id,
-        page_results: List[PotentialLeakSource],
-        search_query,
-        current_page_number,
+            self,
+            scan_id,
+            page_results: List[PotentialLeakSource],
+            search_query,
+            current_page_number,
     ):
-        self.guard_empty_page_results(page_results)
-        filtered_results = self.filter_results(scan_id, page_results)
-        results_with_enriched_iols = self.enrich_iols_in_results_before_save(filtered_results, search_query)
-        self.save_results(results_with_enriched_iols, search_query)
+        results_with_enriched_iols = []
+        if page_results:
+            filtered_results = self.filter_results(scan_id, page_results)
+            results_with_enriched_iols = self.enrich_iols_in_results_before_save(filtered_results, search_query)
+            self.save_results(results_with_enriched_iols, search_query)
+
         self.potential_leak_source_scan_status_service.mark_as_analyzing(
             scan_id, current_page_number
         )
@@ -59,10 +61,6 @@ class SavePotentialLeakSourcePageUseCase:
                 )
             )
         return enrich_iol_results
-
-    def guard_empty_page_results(self, page_results):
-        if not page_results:
-            raise ValueError("Page results cannot be empty")
 
     def filter_results(self, scan_id, page_results):
         filtered_results = []
@@ -86,7 +84,6 @@ class SavePotentialLeakSourcePageUseCase:
                 break
         return is_url_exists
 
-
     def generate_result(self, search_result, iols_data):
 
         return {
@@ -102,7 +99,6 @@ class SavePotentialLeakSourcePageUseCase:
                 non_acknowledged_leaks.append(leak)
 
         return non_acknowledged_leaks
-
 
     def save_results(self, results_with_enriched_iols, search_query):
         for result in results_with_enriched_iols:
