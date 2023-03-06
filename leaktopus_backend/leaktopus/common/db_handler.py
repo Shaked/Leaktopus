@@ -1,13 +1,14 @@
-import sqlite3
-from flask import Flask, g, abort, current_app
-import os
+import datetime
 import re
-from leaktopus.utils.common_imports import logger
-import leaktopus.common.scans as scans
+import sqlite3
+
 import leaktopus.common.contributors as contributors
+import leaktopus.common.db_updates as db_updates
+import leaktopus.common.scans as scans
 import leaktopus.common.sensitive_keywords as sensitive_keywords
 import leaktopus.common.updates as updates
-import leaktopus.common.db_updates as db_updates
+from flask import Flask, g, abort, current_app
+from leaktopus.utils.common_imports import logger
 
 app = Flask(__name__)
 
@@ -134,7 +135,23 @@ def db_install(db):
     db_updates.apply_db_updates(True)
 
 
+class Metrics:
+    def __init__(self):
+        self.collected = {}
+
+    def started(self, name):
+        self.start_time = datetime.datetime.now()
+        self.collected[name] = self.start_time
+
+    def get_time_diff(self, name):
+        diff = datetime.datetime.now() - self.collected[name]
+        logger.debug("%s: Time diff: %s seconds", name, diff.total_seconds())
+        return diff.total_seconds()
+
+
 def get_leak(**kwargs):
+    m = Metrics()
+    m.started("get_leak")
     try:
         sql_cond = []
         sql_vars = ()
@@ -147,40 +164,66 @@ def get_leak(**kwargs):
             where_str = ("=? AND ").join(sql_cond) + "=?"
             # @todo Replace this dirty workaround in a way that supports operators.
             where_str = where_str.replace("created_at=?", "created_at>?")
+            m.started("sql_vars")
+            stmt = "SELECT * FROM leak WHERE " + where_str + " ORDER BY created_at DESC"
             res = cur.execute(
-                "SELECT * FROM leak WHERE " + where_str + " ORDER BY created_at DESC",
+                stmt,
                 sql_vars,
             )
+            m.get_time_diff("sql_vars")
+            logger.debug("sql_vars stmt: %s\n%s", stmt, sql_vars)
         else:
-            res = cur.execute("SELECT * FROM leak ORDER BY created_at DESC")
+            m.started("no_sql_vars")
+            stmt = "SELECT * FROM leak ORDER BY created_at DESC"
+            res = cur.execute(stmt)
+            m.get_time_diff("no_sql_vars")
+            logger.debug("no_sql_vars stmt: %s", stmt)
 
+        m.started("fetchall leaks")
         leaks_res = res.fetchall()
+        m.get_time_diff("fetchall leaks")
         # @todo Replace the secrets fetching with one query with join and grouping.
         for i in range(len(leaks_res)):
+            stmt = "SELECT * FROM secret WHERE leak_id=? ORDER BY created_at DESC"
+            m.started("secrets_res")
             secrets_res = cur.execute(
-                "SELECT * FROM secret WHERE leak_id=? ORDER BY created_at DESC",
+                stmt,
                 (leaks_res[i]["pid"],),
             )
             leaks_res[i]["secrets"] = secrets_res.fetchall()
+            m.get_time_diff("secrets_res")
+            logger.debug("secrets_res stmt: %s\n%s", stmt, (leaks_res[i]["pid"],))
 
+            stmt = "SELECT * FROM domain WHERE leak_id=? ORDER BY created_at DESC"
+            m.started("domains_res")
             domains_res = cur.execute(
-                "SELECT * FROM domain WHERE leak_id=? ORDER BY created_at DESC",
+                stmt,
                 (leaks_res[i]["pid"],),
             )
             leaks_res[i]["domains"] = domains_res.fetchall()
+            m.get_time_diff("domains_res")
+            logger.debug("domains_res stmt: %s\n%s", stmt, (leaks_res[i]["pid"],))
 
+            m.started("get_contributors")
+            stmt = "SELECT id, name, author_email, committer_email, is_organization_domain FROM contributors WHERE leak_id=? ORDER BY created_at DESC"
             domains_res = cur.execute(
-                "SELECT id, name, author_email, committer_email, is_organization_domain FROM contributors WHERE leak_id=? ORDER BY created_at DESC",
+                stmt,
                 (leaks_res[i]["pid"],),
             )
             leaks_res[i]["contributors"] = domains_res.fetchall()
+            m.get_time_diff("get_contributors")
+            logger.debug("get_contributors stmt: %s\n%s", stmt, (leaks_res[i]["pid"],))
 
+            m.started("get_sensitive_keywords")
+            stmt = "SELECT id, keyword, url FROM sensitive_keywords WHERE leak_id=? ORDER BY created_at DESC"
             domains_res = cur.execute(
-                "SELECT id, keyword, url FROM sensitive_keywords WHERE leak_id=? ORDER BY created_at DESC",
+                stmt,
                 (leaks_res[i]["pid"],),
             )
             leaks_res[i]["sensitive_keywords"] = domains_res.fetchall()
+            m.get_time_diff("get_sensitive_keywords")
 
+        m.get_time_diff("get_leak")
         return leaks_res
 
     except Exception as e:
