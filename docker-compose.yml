@@ -14,7 +14,7 @@ x-app: &default-app
   stop_grace_period: "3s"
   tty: true
   volumes:
-    - "db:/db"
+    - "${DB_PATH:-db}:/db"
 #    - "./leaktopus_backend/private-key.pem:/app/private-key.pem"
 
 services:
@@ -74,7 +74,7 @@ services:
           memory: "${DOCKER_WORKER_MEMORY:-0}"
     volumes:
       - "data:/data"
-      - "db:/db"
+      - "${DB_PATH:-db}:/db"
 
   elasticsearch:
     build:
@@ -147,7 +147,7 @@ services:
       - elasticsearch
 
 volumes:
-  db: {}
-  data: {}
-  redis: {}
-  elasticsearch: {}
+  db: { }
+  data: { }
+  redis: { }
+  elasticsearch: { }
